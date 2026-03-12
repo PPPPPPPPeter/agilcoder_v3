@@ -14,7 +14,7 @@ interface PresetStripProps {
 
 export function PresetStrip({ presets, selectedPreset, onSelect, dispatch }: PresetStripProps) {
   const stripRef = useRef<HTMLDivElement>(null)
-  const { hoveredVariantIndex, removeAnnotationsByVariant } = useChat()
+  const { hoveredVariantIndex, removeVariantData, variantMetadata, isLoading } = useChat()
 
   const handleWheel = (e: React.WheelEvent) => {
     if (stripRef.current) {
@@ -27,11 +27,12 @@ export function PresetStrip({ presets, selectedPreset, onSelect, dispatch }: Pre
     const preset = presets[index]
     const confirmed = window.confirm(
       `Delete "Variant ${index + 1}: ${preset.label}"?\n\n` +
-      `All associated feedback and Chat-tab annotations for this variant will also be permanently removed.`,
+      `All associated feedback, annotations, and AI-generated styles for this variant will also be permanently removed.`,
     )
     if (!confirmed) return
-    // Remove annotations first (renumbers survivors), then remove the preset
-    removeAnnotationsByVariant(index)
+    // Remove annotations, manifests, and metadata first (renumbers survivors),
+    // then remove the preset from AppState
+    removeVariantData(index)
     dispatch({ type: 'DELETE_PRESET', payload: index })
   }
 
@@ -59,6 +60,11 @@ export function PresetStrip({ presets, selectedPreset, onSelect, dispatch }: Pre
             index={index}
             onClick={() => onSelect(preset)}
             onDelete={() => handleDelete(index)}
+            // LLM metadata: approach label + summary tooltip (undefined before first generation)
+            approach={variantMetadata[index]?.approach}
+            summary={variantMetadata[index]?.summary}
+            // Disable switching variants while LLM is generating
+            disabled={isLoading}
           />
         ))}
       </div>

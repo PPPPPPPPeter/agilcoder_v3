@@ -1,6 +1,7 @@
-import { ThumbsUp, ThumbsDown, MessageSquare } from 'lucide-react'
+import { ThumbsUp, ThumbsDown, MessageSquare, Loader2 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import type { Annotation } from '@/types'
+import type { ApplyNowResult } from '@/context/ChatContext'
 import { useChat } from '@/context/ChatContext'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -19,6 +20,12 @@ interface UIFeedbackPanelProps {
   scopeId: string
   /** Ref to the preview container — used as the target's elementRef. */
   containerRef: React.RefObject<HTMLDivElement | null>
+  /**
+   * Called when the user clicks "Apply Now".
+   * Provided by PreviewFrame — closes over the current manifest and variantIndex.
+   * Returns a result object (never throws).
+   */
+  onApplyNow?: (annotations: Annotation[]) => Promise<ApplyNowResult>
 }
 
 /**
@@ -27,7 +34,7 @@ interface UIFeedbackPanelProps {
  * Creates a page-level annotation (target.level === 'page') when Attach is clicked.
  * No Tweak / edit-mode — page-level feedback cannot be fine-tuned at element granularity.
  */
-export function UIFeedbackPanel({ variantIndex, scopeId, containerRef }: UIFeedbackPanelProps) {
+export function UIFeedbackPanel({ variantIndex, scopeId, containerRef, onApplyNow }: UIFeedbackPanelProps) {
   const { addAnnotation, removeAnnotation, pendingAnnotations } = useChat()
 
   // Pre-populate from any existing page-level annotation for this variant so the
@@ -48,6 +55,10 @@ export function UIFeedbackPanel({ variantIndex, scopeId, containerRef }: UIFeedb
   )
   const [comment, setComment] = useState(existingAnnotation?.comment ?? '')
 
+  // Apply Now async state
+  const [applyNowLoading, setApplyNowLoading] = useState(false)
+  const [applyNowError,   setApplyNowError]   = useState<string | null>(null)
+
   // Sync state whenever the existing annotation is created, replaced, or removed
   // (e.g. user deletes it from the Chat tab). Parent gives a new `key` on variant switch.
   useEffect(() => {
@@ -65,8 +76,8 @@ export function UIFeedbackPanel({ variantIndex, scopeId, containerRef }: UIFeedb
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [existingAnnotation?.id])
 
-  const canAttach  = reaction !== null || (commentActive && comment.trim().length > 0)
-  const canApplyNow = commentActive && comment.trim().length > 0
+  const canAttach   = reaction !== null || (commentActive && comment.trim().length > 0)
+  const canApplyNow = !applyNowLoading && commentActive && comment.trim().length > 0
 
   const buildPageTarget = () => ({
     scopeId,
@@ -93,15 +104,32 @@ export function UIFeedbackPanel({ variantIndex, scopeId, containerRef }: UIFeedb
     setComment('')
   }
 
-  const handleApplyNow = () => {
-    if (!canApplyNow) return
-    // ====== MOCK — DELETE WHEN LLM IS INTEGRATED ======
-    // Replace with: LLM call to regenerate the entire variant.
-    // Apply Now intentionally does NOT create a Chat-tab annotation.
-    // ====== END MOCK ======
-    setReaction(null)
-    setCommentActive(false)
-    setComment('')
+  const handleApplyNow = async () => {
+    if (!canApplyNow || !onApplyNow) return
+    setApplyNowError(null)
+    setApplyNowLoading(true)
+
+    const annotation: Annotation = {
+      id: genId(),
+      variantIndex,
+      target: buildPageTarget(),
+      type: reaction ?? 'comment',
+      comment: comment.trim(),
+    }
+
+    try {
+      const result = await onApplyNow([annotation])
+      if (result.success) {
+        // Reset form on success
+        setReaction(null)
+        setCommentActive(false)
+        setComment('')
+      } else {
+        setApplyNowError(result.error ?? 'Apply Now failed.')
+      }
+    } finally {
+      setApplyNowLoading(false)
+    }
   }
 
   const toggleReaction = (r: 'like' | 'dislike') =>
@@ -179,7 +207,7 @@ export function UIFeedbackPanel({ variantIndex, scopeId, containerRef }: UIFeedb
       )}
 
       {/* ── Attach | Apply Now ── */}
-      <div className="flex gap-1.5 px-2.5 pt-1 pb-2.5 border-t border-panel-border/50">
+      <div className="flex gap-1.5 px-2.5 pt-1 pb-2 border-t border-panel-border/50">
         <button
           onClick={handleAttach}
           disabled={!canAttach}
@@ -195,15 +223,26 @@ export function UIFeedbackPanel({ variantIndex, scopeId, containerRef }: UIFeedb
         <button
           onClick={handleApplyNow}
           disabled={!canApplyNow}
-          className={`flex-1 py-1 rounded text-xs font-medium transition-all
+          className={`flex-1 py-1 rounded text-xs font-medium transition-all flex items-center justify-center gap-1
             ${canApplyNow
               ? 'bg-panel-bg border border-panel-border text-gray-600 hover:border-accent/50 hover:text-accent'
               : 'bg-panel-border text-panel-muted cursor-not-allowed opacity-50'
             }`}
         >
-          Apply Now
+          {applyNowLoading ? (
+            <><Loader2 size={11} className="animate-spin" /><span>Applying…</span></>
+          ) : (
+            'Apply Now'
+          )}
         </button>
       </div>
+
+      {/* ── Apply Now error ── */}
+      {applyNowError && (
+        <div className="px-2.5 pb-2.5">
+          <p className="text-[10px] text-red-500 leading-relaxed break-words">{applyNowError}</p>
+        </div>
+      )}
     </div>
   )
 }

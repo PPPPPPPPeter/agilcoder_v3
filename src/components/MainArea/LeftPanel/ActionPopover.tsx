@@ -1,6 +1,7 @@
-import { ThumbsUp, ThumbsDown, MessageSquare, X, Pencil, Wrench, Layers } from 'lucide-react'
+import { ThumbsUp, ThumbsDown, MessageSquare, X, Pencil, Wrench, Layers, Loader2 } from 'lucide-react'
 import { useState } from 'react'
 import type { SelectionTarget, Annotation } from '@/types'
+import type { ApplyNowResult } from '@/context/ChatContext'
 import { useChat } from '@/context/ChatContext'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -11,7 +12,7 @@ function genId(): string {
 }
 
 const POPOVER_W = 196
-const POPOVER_H_MAX = 230 // worst-case height estimate (with comment area)
+const POPOVER_H_MAX = 260 // increased slightly to accommodate potential error text
 
 function computePosition(
   el: HTMLElement,
@@ -59,6 +60,12 @@ interface ActionPopoverProps {
    *  pre-populated from the existing annotation, and Attach replaces it instead
    *  of creating a new one. */
   existingAnnotation?: Annotation
+  /**
+   * Called when the user clicks "Apply Now".
+   * Provided by PreviewFrame — closes over the current manifest and variantIndex.
+   * Returns a result object (never throws). If undefined, Apply Now is unavailable.
+   */
+  onApplyNow?: (annotations: Annotation[]) => Promise<ApplyNowResult>
 }
 
 export function ActionPopover({
@@ -67,6 +74,7 @@ export function ActionPopover({
   containerRef,
   onClose,
   existingAnnotation,
+  onApplyNow,
 }: ActionPopoverProps) {
   const { addAnnotation, removeAnnotation } = useChat()
 
@@ -75,9 +83,6 @@ export function ActionPopover({
   const isEditing = !isMultiSelect && existingAnnotation !== undefined
 
   // Pre-populate from existing annotation when in edit mode.
-  // Because ActionPopover is given a fresh `key` by PreviewFrame whenever the
-  // selected element changes, useState initializers always run with the correct
-  // existingAnnotation for that element.
   const [reaction, setReaction] = useState<'like' | 'dislike' | null>(
     isEditing && (existingAnnotation?.type === 'like' || existingAnnotation?.type === 'dislike')
       ? existingAnnotation!.type
@@ -89,6 +94,10 @@ export function ActionPopover({
       : false,
   )
   const [comment, setComment] = useState(isEditing ? (existingAnnotation!.comment ?? '') : '')
+
+  // Apply Now async state
+  const [applyNowLoading, setApplyNowLoading] = useState(false)
+  const [applyNowError,   setApplyNowError]   = useState<string | null>(null)
 
   const container = containerRef.current
   if (!container) return null
@@ -108,8 +117,8 @@ export function ActionPopover({
 
   // Attach: reaction chosen OR non-empty comment text
   const canAttach = reaction !== null || (commentActive && comment.trim().length > 0)
-  // Apply Now: requires non-empty comment text (reaction alone is not sufficient)
-  const canApplyNow = commentActive && comment.trim().length > 0
+  // Apply Now: requires non-empty comment text + not currently loading
+  const canApplyNow = !applyNowLoading && commentActive && comment.trim().length > 0
 
   // Build an annotation object for a given target
   const buildAnnotation = (target: SelectionTarget): Annotation => ({
@@ -136,16 +145,26 @@ export function ActionPopover({
     onClose()
   }
 
-  const handleApplyNow = () => {
-    if (!canApplyNow) return
-    // ====== MOCK — DELETE WHEN LLM IS INTEGRATED ======
-    // Replace with: LLM call to regenerate the targeted element(s).
-    // Input: comment text + selectionTargets (or primaryTarget in single mode)
-    //        + current manifests from context.
-    // Output: a patch (or set of patches) to apply via PatchEngine.
-    // Apply Now intentionally does NOT create Chat-tab annotations.
-    // ====== END MOCK ======
-    onClose()
+  const handleApplyNow = async () => {
+    if (!canApplyNow || !onApplyNow) return
+    setApplyNowError(null)
+    setApplyNowLoading(true)
+
+    // Build annotations (ephemeral — not added to the pending list)
+    const annotations = isMultiSelect
+      ? selectionTargets.map(t => buildAnnotation(t))
+      : [buildAnnotation(primaryTarget)]
+
+    try {
+      const result = await onApplyNow(annotations)
+      if (result.success) {
+        onClose()
+      } else {
+        setApplyNowError(result.error ?? 'Apply Now failed.')
+      }
+    } finally {
+      setApplyNowLoading(false)
+    }
   }
 
   const handleTweak = () => {
@@ -276,15 +295,26 @@ export function ActionPopover({
         <button
           onClick={handleApplyNow}
           disabled={!canApplyNow}
-          className={`flex-1 py-1 rounded text-xs font-medium transition-all
+          className={`flex-1 py-1 rounded text-xs font-medium transition-all flex items-center justify-center gap-1
             ${canApplyNow
               ? 'bg-panel-bg border border-panel-border text-gray-600 hover:border-accent/50 hover:text-accent'
               : 'bg-panel-border text-panel-muted cursor-not-allowed opacity-50'
             }`}
         >
-          Apply Now
+          {applyNowLoading ? (
+            <><Loader2 size={11} className="animate-spin" /><span>Applying…</span></>
+          ) : (
+            'Apply Now'
+          )}
         </button>
       </div>
+
+      {/* ── Apply Now error — shown below buttons when the LLM call fails ── */}
+      {applyNowError && (
+        <div className="px-2.5 pb-2">
+          <p className="text-[10px] text-red-500 leading-relaxed break-words">{applyNowError}</p>
+        </div>
+      )}
 
       {/* ── Tweak button: always enabled — no reaction/comment required ── */}
       <div className="px-2.5 pb-2.5">

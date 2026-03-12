@@ -16,7 +16,7 @@
 
 const MODEL             = 'claude-sonnet-4-20250514'
 const MAX_TOKENS        = 4096
-const API_ENDPOINT      = 'https://api.anthropic.com/v1/messages'
+const API_ENDPOINT      = '/api/anthropic/v1/messages'
 const ANTHROPIC_VERSION = '2023-06-01'
 
 // ─── Key management ───────────────────────────────────────────────────────────
@@ -80,15 +80,25 @@ export async function callLLM(prompt: {
     messages:   [{ role: 'user', content: prompt.user }],
   }
 
+  // ── Debug logging — remove once the proxy is confirmed working ──────────────
+  const requestHeaders = {
+    'Content-Type':      'application/json',
+    'x-api-key':         apiKey!.slice(0, 8) + '…',
+    'anthropic-version': ANTHROPIC_VERSION,
+  }
+  console.log('[callLLM] endpoint:', API_ENDPOINT)
+  console.log('[callLLM] headers (key truncated):', requestHeaders)
+
   // ── Network call ────────────────────────────────────────────────────────────
   let response: Response
   try {
     response = await fetch(API_ENDPOINT, {
       method:  'POST',
       headers: {
-        'Content-Type':     'application/json',
-        'x-api-key':        apiKey!,
-        'anthropic-version': ANTHROPIC_VERSION,
+        'Content-Type':                              'application/json',
+        'x-api-key':                                 apiKey!,
+        'anthropic-version':                         ANTHROPIC_VERSION,
+        'anthropic-dangerous-direct-browser-access': 'true',
       },
       body: JSON.stringify(body),
     })
@@ -101,7 +111,11 @@ export async function callLLM(prompt: {
     const status = response.status
 
     if (status === 401) {
-      throw new Error('Invalid API key.')
+      // Read the body so we can show Anthropic's actual error message in the console
+      let detail = ''
+      try { detail = await response.text() } catch { /* ignore */ }
+      console.error('[callLLM] 401 body:', detail)
+      throw new Error(`Invalid API key. (Anthropic said: ${detail.slice(0, 200)})`)
     }
     if (status === 429) {
       throw new Error('Rate limited. Please wait and try again.')

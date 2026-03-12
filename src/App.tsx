@@ -14,7 +14,7 @@ export default function App() {
   )
 
   return (
-    <ChatProvider>
+    <ChatProvider selectedPreset={state.selectedPreset}>
       <div className="h-screen flex flex-col overflow-hidden bg-panel-bg text-gray-900 select-none">
         <Header
           presets={state.presets}

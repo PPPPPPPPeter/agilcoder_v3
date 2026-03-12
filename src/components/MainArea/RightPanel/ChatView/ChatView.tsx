@@ -24,18 +24,37 @@ function ChatEmptyState() {
   )
 }
 
+// ─── Pulsing loading dots ─────────────────────────────────────────────────────
+
+function GeneratingDots() {
+  return (
+    <div className="flex items-center gap-1.5 px-1 py-2">
+      <span className="text-xs text-panel-muted italic mr-1">Generating</span>
+      {[0, 1, 2].map(i => (
+        <span
+          key={i}
+          className="w-1.5 h-1.5 rounded-full bg-accent/60 animate-bounce"
+          style={{ animationDelay: `${i * 0.15}s`, animationDuration: '0.9s' }}
+        />
+      ))}
+    </div>
+  )
+}
+
 // ─── Message history ──────────────────────────────────────────────────────────
 
 function MessageHistory() {
-  const { messages } = useChat()
+  const { messages, isLoading } = useChat()
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  // Auto-scroll to bottom whenever new messages arrive
+  // Auto-scroll to bottom whenever new messages arrive or loading state changes
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+  }, [messages, isLoading])
 
-  if (messages.length === 0) return <ChatEmptyState />
+  const hasMessages = messages.length > 0
+
+  if (!hasMessages && !isLoading) return <ChatEmptyState />
 
   return (
     <div
@@ -45,6 +64,8 @@ function MessageHistory() {
       {messages.map(msg => (
         <MessageBubble key={msg.id} message={msg} />
       ))}
+      {/* Pulsing dots shown while waiting for the LLM response */}
+      {isLoading && <GeneratingDots />}
       <div ref={bottomRef} />
     </div>
   )

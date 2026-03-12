@@ -10,6 +10,21 @@ interface PresetThumbnailProps {
   onClick: () => void
   /** Called when the user confirms deletion of this variant. */
   onDelete?: () => void
+  /**
+   * Short approach label from LLM metadata (e.g. "conservative", "balanced").
+   * Displayed in the thumbnail label. Falls back to preset.label when absent.
+   */
+  approach?: string
+  /**
+   * Full one-sentence summary from LLM metadata.
+   * Shown as a native tooltip on hover (title attribute).
+   */
+  summary?: string
+  /**
+   * When true, clicking is disabled and opacity is reduced.
+   * Used while LLM generation is in progress.
+   */
+  disabled?: boolean
 }
 
 const CASE_META = {
@@ -28,6 +43,9 @@ export function PresetThumbnail({
   index,
   onClick,
   onDelete,
+  approach,
+  summary,
+  disabled = false,
 }: PresetThumbnailProps) {
   const meta = CASE_META[preset.caseName]
 
@@ -36,17 +54,26 @@ export function PresetThumbnail({
     onDelete?.()
   }
 
+  const handleClick = () => {
+    if (!disabled) onClick()
+  }
+
+  // Label: LLM approach label if available, otherwise fall back to preset.label
+  const label = approach ?? preset.label
+
   return (
     <motion.div
-      className="flex-shrink-0 flex flex-col items-center gap-1 cursor-pointer group/thumb"
+      className={`flex-shrink-0 flex flex-col items-center gap-1 group/thumb
+        ${disabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}
       initial={{ opacity: 0, x: 16 }}
-      animate={{ opacity: 1, x: 0 }}
+      animate={{ opacity: disabled ? 0.5 : 1, x: 0 }}
       transition={{ duration: 0.18, delay: index * 0.03 }}
-      onClick={onClick}
+      onClick={handleClick}
     >
       {/* overflow-visible so the × button can poke outside the 72×44 area */}
       <div
         className="relative overflow-visible transition-all duration-150"
+        title={summary}
         style={{
           width: 72,
           height: 44,
@@ -65,8 +92,14 @@ export function PresetThumbnail({
           transform: 'scale(1)',
           transition: 'border-color 0.15s, box-shadow 0.15s',
         }}
-        onMouseEnter={(e) => { if (!isSelected && !isHovered) (e.currentTarget as HTMLDivElement).style.borderColor = '#b0b7c3' }}
-        onMouseLeave={(e) => { if (!isSelected && !isHovered) (e.currentTarget as HTMLDivElement).style.borderColor = '#e8ecf0' }}
+        onMouseEnter={(e) => {
+          if (!isSelected && !isHovered && !disabled)
+            (e.currentTarget as HTMLDivElement).style.borderColor = '#b0b7c3'
+        }}
+        onMouseLeave={(e) => {
+          if (!isSelected && !isHovered)
+            (e.currentTarget as HTMLDivElement).style.borderColor = '#e8ecf0'
+        }}
       >
         {/* Wireframe layout lines */}
         <div className="absolute inset-0 flex flex-col" style={{ padding: 4, gap: 2, borderRadius: 4, overflow: 'hidden' }}>
@@ -91,8 +124,8 @@ export function PresetThumbnail({
           {meta.badge}
         </div>
 
-        {/* Delete (×) button — top-right corner, visible on hover */}
-        {onDelete && (
+        {/* Delete (×) button — top-right corner, visible on hover (hidden when disabled) */}
+        {onDelete && !disabled && (
           <button
             onClick={handleDeleteClick}
             className="absolute -top-1.5 -right-1.5 w-4 h-4 flex items-center justify-center
@@ -100,7 +133,7 @@ export function PresetThumbnail({
               opacity-0 group-hover/thumb:opacity-100
               hover:!bg-red-500
               transition-all duration-150 shadow-sm z-10"
-            title={`Delete Variant ${index + 1}: ${preset.label}`}
+            title={`Delete Variant ${index + 1}: ${label}`}
           >
             <X size={8} strokeWidth={2.5} />
           </button>
@@ -108,7 +141,7 @@ export function PresetThumbnail({
       </div>
 
       <span className="text-2xs text-panel-muted font-code truncate max-w-[96px]">
-        Variant {index + 1}: {preset.label}
+        Variant {index + 1}: {label}
       </span>
     </motion.div>
   )

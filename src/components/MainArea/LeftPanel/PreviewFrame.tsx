@@ -1,6 +1,7 @@
 import { useRef, useCallback, useState, useEffect, useMemo } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import type { AppState, AppAction, SelectionTarget, Annotation, RenderDescriptor } from '@/types'
+import type { Manifest } from '@/api/promptGenerator/types'
 import { PreviewContent } from './MockAcademicPage'
 import { FeedbackOverlay } from './FeedbackOverlay'
 import { SelectionBreadcrumb } from './SelectionBreadcrumb'
@@ -88,10 +89,25 @@ export function PreviewFrame({ state, dispatch }: PreviewFrameProps) {
       ))
     : 0
 
+  const { pendingAnnotations, pendingNavigation, clearNavigation, currentManifests, applyNow } = useChat()
+
   // Build a full RenderDescriptor for the selected preset.
+  // Priority: LLM-generated manifest for this variant index → preset fallback with empty CSS.
   // useMemo keeps scopeId stable (no random suffix) so the <style> tag doesn't thrash.
   const descriptor = useMemo<RenderDescriptor | null>(() => {
     if (!selectedPreset) return null
+
+    const scopeIdFn = () => `scope-${selectedPreset.caseName}-${selectedPreset.presetName}`
+
+    // Use the LLM-generated manifest if available for this variant index
+    const llmManifest = currentManifests[variantIndex] as Manifest | undefined
+    if (llmManifest) {
+      return manifestRenderOne(llmManifest, {
+        generateScopeId: scopeIdFn,
+      }) as RenderDescriptor
+    }
+
+    // Fallback: build from preset content with empty CSS (before first LLM round)
     const content = getPreset(selectedPreset.caseName, selectedPreset.presetName)
     const layout  = PRESET_LAYOUT_MAP[selectedPreset.presetName] ?? 'classic'
     const manifest = createManifest({
@@ -99,17 +115,40 @@ export function PreviewFrame({ state, dispatch }: PreviewFrameProps) {
       preset:   selectedPreset.presetName,
       content,
       layout,
-      css: '',      // LLM-generated CSS will be patched in here later
+      css: '',
     })
     return manifestRenderOne(manifest, {
-      // Stable, deterministic scope ID — no random suffix, survives re-renders
-      generateScopeId: () =>
-        `scope-${selectedPreset.caseName}-${selectedPreset.presetName}`,
+      generateScopeId: scopeIdFn,
     }) as RenderDescriptor
-  }, [selectedPreset])
+  }, [selectedPreset, currentManifests, variantIndex])
+
+  // ── Apply Now callback ───────────────────────────────────────────────────────
+
+  /**
+   * Called by ActionPopover and UIFeedbackPanel when the user clicks "Apply Now".
+   * Compiles the prompt, calls the LLM, applies patches, and updates the manifest.
+   * Returns a result object so the caller can show loading/error state.
+   */
+  const handleApplyNow = useCallback(async (annotations: Annotation[]) => {
+    if (!descriptor) return { success: false as const, error: 'No manifest available.' }
+
+    // Use LLM manifest if available; fall back to descriptor's manifest
+    const manifest = (currentManifests[variantIndex] ?? descriptor.manifest) as unknown as Manifest
+    const result   = await applyNow(annotations, manifest, variantIndex)
+
+    // Flash annotated elements on success to give visual feedback
+    if (result.success) {
+      for (const ann of annotations) {
+        if (ann.target.level !== 'page' && ann.target.elementRef !== document.body) {
+          flashElement(ann.target.elementRef)
+        }
+      }
+    }
+
+    return result
+  }, [descriptor, currentManifests, variantIndex, applyNow])
 
   // ── Annotation navigation (from Chat tab click) ──────────────────────────────
-  const { pendingAnnotations, pendingNavigation, clearNavigation } = useChat()
 
   // Holds an annotation that needs to be flashed after a variant switch settles.
   const pendingFlashRef = useRef<Annotation | null>(null)
@@ -191,9 +230,6 @@ export function PreviewFrame({ state, dispatch }: PreviewFrameProps) {
   const showPopover = feedbackModeActive && primaryTarget !== null && !popoverDismissed
 
   // ── Existing annotation for current selection (drives ActionPopover edit mode) ─
-  // Matches by cssSelector + variantIndex first (survives DOM re-renders), then
-  // falls back to elementRef identity (same-mount).
-  // Only meaningful in single-select mode.
   const existingAnnotation =
     selectionTargets.length === 1 && primaryTarget
       ? pendingAnnotations.find(a =>
@@ -284,6 +320,7 @@ export function PreviewFrame({ state, dispatch }: PreviewFrameProps) {
           existingAnnotation={existingAnnotation}
           containerRef={containerRef}
           onClose={() => setPopoverDismissed(true)}
+          onApplyNow={handleApplyNow}
         />
       )}
 
@@ -305,13 +342,13 @@ export function PreviewFrame({ state, dispatch }: PreviewFrameProps) {
               variantIndex={variantIndex}
               scopeId={descriptor.scopeId}
               containerRef={containerRef}
+              onApplyNow={handleApplyNow}
             />
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Selection breadcrumb — shows the primary (most recently clicked) selection.
-          Persists across feedback mode toggles as long as any selection exists. */}
+      {/* Selection breadcrumb — shows the primary (most recently clicked) selection. */}
       <AnimatePresence>
         {primaryTarget && (
           <motion.div
