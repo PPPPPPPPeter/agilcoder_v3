@@ -6,7 +6,7 @@ import { FeedbackOverlay } from './FeedbackOverlay'
 import { SelectionBreadcrumb } from './SelectionBreadcrumb'
 import { FloatingControls } from './FloatingControls'
 import { ActionPopover } from './ActionPopover'
-import { PRESETS } from '@/components/Header/PresetStrip'
+import { UIFeedbackPanel } from './UIFeedbackPanel'
 import { useChat } from '@/context/ChatContext'
 // @ts-ignore — JS module; types handled by PreviewContent wrapper
 import { getPreset, createManifest, manifestRenderOne } from '@/api/manifestRenderingEng/index.js'
@@ -76,14 +76,14 @@ interface PreviewFrameProps {
 
 export function PreviewFrame({ state, dispatch }: PreviewFrameProps) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const { selectedPreset, feedbackModeActive, selectionTargets } = state
+  const { selectedPreset, feedbackModeActive, selectionTargets, presets } = state
 
   // Primary selection = most recently added (last in array); drives breadcrumb + popover
   const primaryTarget = selectionTargets[selectionTargets.length - 1] ?? null
 
-  // Variant index: 0-based index of the selected preset in the header PRESETS strip
+  // Variant index: 0-based index of the selected preset in the live presets list
   const variantIndex = selectedPreset
-    ? Math.max(0, PRESETS.findIndex(
+    ? Math.max(0, presets.findIndex(
         p => p.caseName === selectedPreset.caseName && p.presetName === selectedPreset.presetName,
       ))
     : 0
@@ -117,7 +117,7 @@ export function PreviewFrame({ state, dispatch }: PreviewFrameProps) {
   useEffect(() => {
     if (!pendingNavigation) return
 
-    const targetPreset = PRESETS[pendingNavigation.variantIndex]
+    const targetPreset = presets[pendingNavigation.variantIndex]
     if (!targetPreset) {
       clearNavigation()
       return
@@ -145,7 +145,7 @@ export function PreviewFrame({ state, dispatch }: PreviewFrameProps) {
       dispatch({ type: 'SELECT_PRESET', payload: targetPreset })
       clearNavigation()
     }
-  }, [pendingNavigation, clearNavigation, selectedPreset, dispatch])
+  }, [pendingNavigation, clearNavigation, selectedPreset, dispatch, presets])
 
   // After a variant switch, flash the element once the new DOM has settled.
   useEffect(() => {
@@ -164,6 +164,14 @@ export function PreviewFrame({ state, dispatch }: PreviewFrameProps) {
 
     return () => clearTimeout(timerId)
   }, [selectedPreset])
+
+  // ── UI Feedback Panel visibility ─────────────────────────────────────────────
+  // Controlled by the Monitor button in FloatingControls. Auto-closes when
+  // feedback mode is turned off.
+  const [uiFeedbackOpen, setUiFeedbackOpen] = useState(false)
+  useEffect(() => {
+    if (!feedbackModeActive) setUiFeedbackOpen(false)
+  }, [feedbackModeActive])
 
   // ── Action Popover visibility ────────────────────────────────────────────────
   // Reset "dismissed" whenever the primary target changes to a different element,
@@ -185,14 +193,16 @@ export function PreviewFrame({ state, dispatch }: PreviewFrameProps) {
   // ── Existing annotation for current selection (drives ActionPopover edit mode) ─
   // Matches by cssSelector + variantIndex first (survives DOM re-renders), then
   // falls back to elementRef identity (same-mount).
-  const existingAnnotation = primaryTarget
-    ? pendingAnnotations.find(a =>
-        (a.target.cssSelector && primaryTarget.cssSelector &&
-         a.target.cssSelector === primaryTarget.cssSelector &&
-         a.variantIndex === primaryTarget.variantIndex) ||
-        a.target.elementRef === primaryTarget.elementRef,
-      )
-    : undefined
+  // Only meaningful in single-select mode.
+  const existingAnnotation =
+    selectionTargets.length === 1 && primaryTarget
+      ? pendingAnnotations.find(a =>
+          (a.target.cssSelector && primaryTarget.cssSelector &&
+           a.target.cssSelector === primaryTarget.cssSelector &&
+           a.variantIndex === primaryTarget.variantIndex) ||
+          a.target.elementRef === primaryTarget.elementRef,
+        )
+      : undefined
 
   // ── Selection callbacks ──────────────────────────────────────────────────────
 
@@ -270,11 +280,35 @@ export function PreviewFrame({ state, dispatch }: PreviewFrameProps) {
         <ActionPopover
           key={`${primaryTarget.cssSelector ?? primaryTarget.label}-v${primaryTarget.variantIndex}`}
           primaryTarget={primaryTarget}
+          selectionTargets={selectionTargets}
           existingAnnotation={existingAnnotation}
           containerRef={containerRef}
           onClose={() => setPopoverDismissed(true)}
         />
       )}
+
+      {/* UI Feedback Panel — anchored above-left of the FloatingControls button column.
+          Opened by the Monitor button in FloatingControls. Keyed by variantIndex so it
+          resets when the user switches to a different variant. */}
+      <AnimatePresence>
+        {feedbackModeActive && uiFeedbackOpen && selectedPreset && descriptor && (
+          <motion.div
+            key={`ui-feedback-${variantIndex}`}
+            className="absolute bottom-4 right-14 z-40"
+            data-no-intercept
+            initial={{ opacity: 0, scale: 0.95, y: 4 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 4 }}
+            transition={{ duration: 0.15 }}
+          >
+            <UIFeedbackPanel
+              variantIndex={variantIndex}
+              scopeId={descriptor.scopeId}
+              containerRef={containerRef}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Selection breadcrumb — shows the primary (most recently clicked) selection.
           Persists across feedback mode toggles as long as any selection exists. */}
@@ -303,6 +337,8 @@ export function PreviewFrame({ state, dispatch }: PreviewFrameProps) {
       <FloatingControls
         feedbackModeActive={feedbackModeActive}
         onToggleFeedback={() => dispatch({ type: 'TOGGLE_FEEDBACK_MODE' })}
+        uiFeedbackOpen={uiFeedbackOpen}
+        onToggleUIFeedback={() => setUiFeedbackOpen(o => !o)}
       />
     </div>
   )

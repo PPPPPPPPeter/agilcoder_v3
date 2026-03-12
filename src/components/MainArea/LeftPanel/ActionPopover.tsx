@@ -1,4 +1,4 @@
-import { ThumbsUp, ThumbsDown, MessageSquare, X, Pencil, Wrench } from 'lucide-react'
+import { ThumbsUp, ThumbsDown, MessageSquare, X, Pencil, Wrench, Layers } from 'lucide-react'
 import { useState } from 'react'
 import type { SelectionTarget, Annotation } from '@/types'
 import { useChat } from '@/context/ChatContext'
@@ -51,32 +51,44 @@ function computePosition(
 
 interface ActionPopoverProps {
   primaryTarget: SelectionTarget
+  /** All currently selected targets. When length > 1, multi-select mode is active. */
+  selectionTargets: SelectionTarget[]
   containerRef: React.RefObject<HTMLDivElement | null>
   onClose: () => void
-  /** When set, the popover opens in edit mode: state is pre-populated from the
-   *  existing annotation, and Attach replaces it instead of creating a new one. */
+  /** When set (single-select only), the popover opens in edit mode: state is
+   *  pre-populated from the existing annotation, and Attach replaces it instead
+   *  of creating a new one. */
   existingAnnotation?: Annotation
 }
 
-export function ActionPopover({ primaryTarget, containerRef, onClose, existingAnnotation }: ActionPopoverProps) {
+export function ActionPopover({
+  primaryTarget,
+  selectionTargets,
+  containerRef,
+  onClose,
+  existingAnnotation,
+}: ActionPopoverProps) {
   const { addAnnotation, removeAnnotation } = useChat()
-  const isEditing = existingAnnotation !== undefined
+
+  const isMultiSelect = selectionTargets.length > 1
+  // Edit mode is only meaningful in single-select
+  const isEditing = !isMultiSelect && existingAnnotation !== undefined
 
   // Pre-populate from existing annotation when in edit mode.
   // Because ActionPopover is given a fresh `key` by PreviewFrame whenever the
   // selected element changes, useState initializers always run with the correct
   // existingAnnotation for that element.
   const [reaction, setReaction] = useState<'like' | 'dislike' | null>(
-    existingAnnotation?.type === 'like' || existingAnnotation?.type === 'dislike'
-      ? existingAnnotation.type
+    isEditing && (existingAnnotation?.type === 'like' || existingAnnotation?.type === 'dislike')
+      ? existingAnnotation!.type
       : null,
   )
   const [commentActive, setCommentActive] = useState(
-    existingAnnotation
-      ? (existingAnnotation.type === 'comment' || !!existingAnnotation.comment)
+    isEditing
+      ? (existingAnnotation!.type === 'comment' || !!existingAnnotation!.comment)
       : false,
   )
-  const [comment, setComment] = useState(existingAnnotation?.comment ?? '')
+  const [comment, setComment] = useState(isEditing ? (existingAnnotation!.comment ?? '') : '')
 
   const container = containerRef.current
   if (!container) return null
@@ -99,40 +111,63 @@ export function ActionPopover({ primaryTarget, containerRef, onClose, existingAn
   // Apply Now: requires non-empty comment text (reaction alone is not sufficient)
   const canApplyNow = commentActive && comment.trim().length > 0
 
+  // Build an annotation object for a given target
+  const buildAnnotation = (target: SelectionTarget): Annotation => ({
+    id: genId(),
+    variantIndex: target.variantIndex,
+    target,
+    type: reaction ?? 'comment',
+    comment: commentActive && comment.trim() ? comment.trim() : undefined,
+  })
+
   const handleAttach = () => {
     if (!canAttach) return
-    // In edit mode, remove the old annotation before adding the updated one.
-    if (existingAnnotation) removeAnnotation(existingAnnotation.id)
-    addAnnotation({
-      id: genId(),
-      variantIndex: primaryTarget.variantIndex,
-      target: primaryTarget,
-      type: reaction ?? 'comment',
-      comment: commentActive && comment.trim() ? comment.trim() : undefined,
-    })
+
+    if (isMultiSelect) {
+      // Create one annotation per selected target
+      for (const target of selectionTargets) {
+        addAnnotation(buildAnnotation(target))
+      }
+    } else {
+      // Single-select: in edit mode, replace the existing annotation
+      if (existingAnnotation) removeAnnotation(existingAnnotation.id)
+      addAnnotation(buildAnnotation(primaryTarget))
+    }
     onClose()
   }
 
   const handleApplyNow = () => {
     if (!canApplyNow) return
     // ====== MOCK — DELETE WHEN LLM IS INTEGRATED ======
-    // Replace with: LLM call to regenerate only the targeted element.
-    // Input: comment text + primaryTarget (contentPath / cssSelector / variantIndex)
-    //        + current manifest from context.
+    // Replace with: LLM call to regenerate the targeted element(s).
+    // Input: comment text + selectionTargets (or primaryTarget in single mode)
+    //        + current manifests from context.
     // Output: a patch (or set of patches) to apply via PatchEngine.
-    // Apply Now intentionally does NOT create a Chat-tab annotation.
+    // Apply Now intentionally does NOT create Chat-tab annotations.
     // ====== END MOCK ======
     onClose()
   }
 
   const handleTweak = () => {
-    if (existingAnnotation) removeAnnotation(existingAnnotation.id)
-    addAnnotation({
-      id: genId(),
-      variantIndex: primaryTarget.variantIndex,
-      target: primaryTarget,
-      type: 'tweak',
-    })
+    if (isMultiSelect) {
+      // Create a tweak annotation for each selected target
+      for (const target of selectionTargets) {
+        addAnnotation({
+          id: genId(),
+          variantIndex: target.variantIndex,
+          target,
+          type: 'tweak',
+        })
+      }
+    } else {
+      if (existingAnnotation) removeAnnotation(existingAnnotation.id)
+      addAnnotation({
+        id: genId(),
+        variantIndex: primaryTarget.variantIndex,
+        target: primaryTarget,
+        type: 'tweak',
+      })
+    }
     onClose()
   }
 
@@ -142,11 +177,18 @@ export function ActionPopover({ primaryTarget, containerRef, onClose, existingAn
       className="absolute z-50 bg-panel-surface border border-panel-border rounded-lg shadow-xl"
       style={{ top: pos.top, left: pos.left, width: POPOVER_W }}
     >
-      {/* ── Header: element label + edit indicator + close ── */}
+      {/* ── Header: element label / multi-select count + edit indicator + close ── */}
       <div className="flex items-center justify-between px-2.5 pt-2 pb-1.5">
-        <span className="text-xs text-panel-muted font-mono truncate flex-1">
-          {primaryTarget.label}
-        </span>
+        {isMultiSelect ? (
+          <span className="flex items-center gap-1 text-xs text-accent font-medium flex-1 min-w-0">
+            <Layers size={11} className="flex-shrink-0" />
+            <span>{selectionTargets.length} elements selected</span>
+          </span>
+        ) : (
+          <span className="text-xs text-panel-muted font-mono truncate flex-1">
+            {primaryTarget.label}
+          </span>
+        )}
         {isEditing && (
           <span
             className="flex items-center gap-0.5 text-xs text-amber-500 flex-shrink-0 mr-1.5"
@@ -209,7 +251,7 @@ export function ActionPopover({ primaryTarget, containerRef, onClose, existingAn
           <textarea
             value={comment}
             onChange={e => setComment(e.target.value)}
-            placeholder="Add a comment…"
+            placeholder={isMultiSelect ? 'Comment for all selected…' : 'Add a comment…'}
             rows={2}
             className="w-full text-xs bg-panel-bg border border-panel-border rounded p-1.5 text-gray-700 placeholder:text-panel-muted resize-none outline-none focus:border-accent/50 transition-colors"
             style={{ scrollbarWidth: 'none' }}
@@ -228,7 +270,7 @@ export function ActionPopover({ primaryTarget, containerRef, onClose, existingAn
               : 'bg-panel-border text-panel-muted cursor-not-allowed opacity-50'
             }`}
         >
-          {isEditing ? 'Update' : 'Attach'}
+          {isEditing ? 'Update' : isMultiSelect ? `Attach ${selectionTargets.length}` : 'Attach'}
         </button>
 
         <button
@@ -251,10 +293,14 @@ export function ActionPopover({ primaryTarget, containerRef, onClose, existingAn
           className="w-full flex items-center justify-center gap-1.5 py-1 rounded text-xs font-medium
             bg-panel-bg border border-panel-border/70 text-panel-muted
             hover:border-violet-400/60 hover:text-violet-500 transition-all"
-          title="Mark this element for tweaking without a specific reaction"
+          title={
+            isMultiSelect
+              ? `Mark all ${selectionTargets.length} selected elements for tweaking`
+              : 'Mark this element for tweaking without a specific reaction'
+          }
         >
           <Wrench size={11} />
-          <span>Tweak</span>
+          <span>{isMultiSelect ? `Tweak ${selectionTargets.length}` : 'Tweak'}</span>
         </button>
       </div>
 

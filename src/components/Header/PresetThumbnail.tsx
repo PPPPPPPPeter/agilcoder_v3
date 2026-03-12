@@ -1,3 +1,4 @@
+import { X } from 'lucide-react'
 import { motion } from 'framer-motion'
 import type { ContentPreset } from '@/types'
 
@@ -7,6 +8,8 @@ interface PresetThumbnailProps {
   isHovered?: boolean
   index: number
   onClick: () => void
+  /** Called when the user confirms deletion of this variant. */
+  onDelete?: () => void
 }
 
 const CASE_META = {
@@ -18,19 +21,32 @@ const CASE_META = {
   },
 } as const
 
-export function PresetThumbnail({ preset, isSelected, isHovered = false, index, onClick }: PresetThumbnailProps) {
+export function PresetThumbnail({
+  preset,
+  isSelected,
+  isHovered = false,
+  index,
+  onClick,
+  onDelete,
+}: PresetThumbnailProps) {
   const meta = CASE_META[preset.caseName]
+
+  const handleDeleteClick = (e: React.MouseEvent) => {
+    e.stopPropagation() // don't also select this preset
+    onDelete?.()
+  }
 
   return (
     <motion.div
-      className="flex-shrink-0 flex flex-col items-center gap-1 cursor-pointer"
+      className="flex-shrink-0 flex flex-col items-center gap-1 cursor-pointer group/thumb"
       initial={{ opacity: 0, x: 16 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ duration: 0.18, delay: index * 0.03 }}
       onClick={onClick}
     >
+      {/* overflow-visible so the × button can poke outside the 72×44 area */}
       <div
-        className="relative overflow-hidden transition-all duration-150"
+        className="relative overflow-visible transition-all duration-150"
         style={{
           width: 72,
           height: 44,
@@ -53,7 +69,7 @@ export function PresetThumbnail({ preset, isSelected, isHovered = false, index, 
         onMouseLeave={(e) => { if (!isSelected && !isHovered) (e.currentTarget as HTMLDivElement).style.borderColor = '#e8ecf0' }}
       >
         {/* Wireframe layout lines */}
-        <div className="absolute inset-0 flex flex-col" style={{ padding: 4, gap: 2 }}>
+        <div className="absolute inset-0 flex flex-col" style={{ padding: 4, gap: 2, borderRadius: 4, overflow: 'hidden' }}>
           {/* Nav row */}
           <div className="w-full h-1.5 rounded-sm opacity-30" style={{ backgroundColor: meta.accent }} />
           {/* Content rows */}
@@ -74,6 +90,21 @@ export function PresetThumbnail({ preset, isSelected, isHovered = false, index, 
         >
           {meta.badge}
         </div>
+
+        {/* Delete (×) button — top-right corner, visible on hover */}
+        {onDelete && (
+          <button
+            onClick={handleDeleteClick}
+            className="absolute -top-1.5 -right-1.5 w-4 h-4 flex items-center justify-center
+              rounded-full bg-gray-400 text-white
+              opacity-0 group-hover/thumb:opacity-100
+              hover:!bg-red-500
+              transition-all duration-150 shadow-sm z-10"
+            title={`Delete Variant ${index + 1}: ${preset.label}`}
+          >
+            <X size={8} strokeWidth={2.5} />
+          </button>
+        )}
       </div>
 
       <span className="text-2xs text-panel-muted font-code truncate max-w-[96px]">

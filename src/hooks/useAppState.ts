@@ -1,13 +1,23 @@
 import { useReducer } from 'react'
-import type { AppState, AppAction, CSSGroupId } from '@/types'
+import type { AppState, AppAction, CSSGroupId, ContentPreset } from '@/types'
 
 let nextHistoryId = 100
+
+// Initial preset list — the 5 academic presets shown in the header strip
+export const INITIAL_PRESETS: ContentPreset[] = [
+  { caseName: 'academic-homepage', presetName: 'default',             label: 'PhD Student'   },
+  { caseName: 'academic-homepage', presetName: 'senior-professor',    label: 'Professor'     },
+  { caseName: 'academic-homepage', presetName: 'industry-researcher', label: 'Industry Res.' },
+  { caseName: 'academic-homepage', presetName: 'early-career',        label: 'Early Career'  },
+  { caseName: 'academic-homepage', presetName: 'interdisciplinary',   label: 'Postdoc'       },
+]
 
 const initialState: AppState = {
   prompt: '',
   hasGenerated: false,
   selectedVariantId: null,
   variants: [],
+  presets: INITIAL_PRESETS,
   selectedPreset: null,
   historyByVariant: {},
   currentHistoryIndex: {},
@@ -232,6 +242,37 @@ function appReducer(state: AppState, action: AppAction): AppState {
         selectionTargets: exists
           ? state.selectionTargets.filter(t => t.elementRef !== action.payload.elementRef)
           : [...state.selectionTargets, action.payload],
+      }
+    }
+
+    case 'DELETE_PRESET': {
+      const deletedIdx = action.payload
+      const newPresets = state.presets.filter((_, i) => i !== deletedIdx)
+
+      // Determine new selected preset after deletion
+      const currentSelectedIdx = state.selectedPreset
+        ? state.presets.findIndex(
+            p =>
+              p.caseName === state.selectedPreset!.caseName &&
+              p.presetName === state.selectedPreset!.presetName,
+          )
+        : -1
+
+      let newSelectedPreset = state.selectedPreset
+      if (currentSelectedIdx === deletedIdx) {
+        // Deleted the selected preset — fall back to nearest remaining
+        if (newPresets.length === 0) {
+          newSelectedPreset = null
+        } else {
+          newSelectedPreset = newPresets[Math.min(deletedIdx, newPresets.length - 1)] ?? null
+        }
+      }
+
+      return {
+        ...state,
+        presets: newPresets,
+        selectedPreset: newSelectedPreset,
+        selectionTargets: [],
       }
     }
 

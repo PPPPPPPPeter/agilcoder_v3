@@ -17,8 +17,10 @@ export default function App() {
     <ChatProvider>
       <div className="h-screen flex flex-col overflow-hidden bg-panel-bg text-gray-900 select-none">
         <Header
+          presets={state.presets}
           selectedPreset={state.selectedPreset}
           onSelectPreset={(preset) => dispatch({ type: 'SELECT_PRESET', payload: preset })}
+          dispatch={dispatch}
         />
         <MainArea state={state} dispatch={dispatch} />
         <Footer />

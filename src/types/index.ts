@@ -172,6 +172,7 @@ export interface AppState {
   hasGenerated: boolean
   selectedVariantId: string | null
   variants: Variant[]
+  presets: ContentPreset[]
   selectedPreset: ContentPreset | null
   historyByVariant: Record<string, HistoryNode[]>
   currentHistoryIndex: Record<string, number>
@@ -211,3 +212,4 @@ export type AppAction =
   | { type: 'SELECT_PRESET'; payload: ContentPreset | null }
   | { type: 'SET_SELECTION_TARGETS'; payload: SelectionTarget[] }
   | { type: 'TOGGLE_MULTI_SELECT'; payload: SelectionTarget }
+  | { type: 'DELETE_PRESET'; payload: number }

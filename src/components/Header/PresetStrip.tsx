@@ -1,31 +1,38 @@
 import { useRef } from 'react'
-import type { ContentPreset, PresetCaseName } from '@/types'
+import type { ContentPreset, PresetCaseName, AppAction } from '@/types'
 import { PresetThumbnail } from './PresetThumbnail'
 import { useChat } from '@/context/ChatContext'
-
-// The 5 academic preset descriptors
-const PRESETS: ContentPreset[] = [
-  { caseName: 'academic-homepage', presetName: 'default',             label: 'PhD Student'   },
-  { caseName: 'academic-homepage', presetName: 'senior-professor',    label: 'Professor'     },
-  { caseName: 'academic-homepage', presetName: 'industry-researcher', label: 'Industry Res.' },
-  { caseName: 'academic-homepage', presetName: 'early-career',        label: 'Early Career'  },
-  { caseName: 'academic-homepage', presetName: 'interdisciplinary',   label: 'Postdoc'       },
-]
+import { INITIAL_PRESETS } from '@/hooks/useAppState'
 
 interface PresetStripProps {
+  /** Live (possibly trimmed) preset list from AppState. */
+  presets: ContentPreset[]
   selectedPreset: ContentPreset | null
   onSelect: (preset: ContentPreset) => void
+  dispatch: React.Dispatch<AppAction>
 }
 
-export function PresetStrip({ selectedPreset, onSelect }: PresetStripProps) {
+export function PresetStrip({ presets, selectedPreset, onSelect, dispatch }: PresetStripProps) {
   const stripRef = useRef<HTMLDivElement>(null)
-  const { hoveredVariantIndex } = useChat()
+  const { hoveredVariantIndex, removeAnnotationsByVariant } = useChat()
 
   const handleWheel = (e: React.WheelEvent) => {
     if (stripRef.current) {
       e.preventDefault()
       stripRef.current.scrollLeft += e.deltaY
     }
+  }
+
+  const handleDelete = (index: number) => {
+    const preset = presets[index]
+    const confirmed = window.confirm(
+      `Delete "Variant ${index + 1}: ${preset.label}"?\n\n` +
+      `All associated feedback and Chat-tab annotations for this variant will also be permanently removed.`,
+    )
+    if (!confirmed) return
+    // Remove annotations first (renumbers survivors), then remove the preset
+    removeAnnotationsByVariant(index)
+    dispatch({ type: 'DELETE_PRESET', payload: index })
   }
 
   return (
@@ -40,7 +47,7 @@ export function PresetStrip({ selectedPreset, onSelect }: PresetStripProps) {
         style={{ WebkitOverflowScrolling: 'touch' } as React.CSSProperties}
         onWheel={handleWheel}
       >
-        {PRESETS.map((preset, index) => (
+        {presets.map((preset, index) => (
           <PresetThumbnail
             key={`${preset.caseName}/${preset.presetName}`}
             preset={preset}
@@ -51,6 +58,7 @@ export function PresetStrip({ selectedPreset, onSelect }: PresetStripProps) {
             isHovered={hoveredVariantIndex === index}
             index={index}
             onClick={() => onSelect(preset)}
+            onDelete={() => handleDelete(index)}
           />
         ))}
       </div>
@@ -58,8 +66,8 @@ export function PresetStrip({ selectedPreset, onSelect }: PresetStripProps) {
   )
 }
 
-// Re-export the list so other components can use it if needed
-export { PRESETS }
+// Re-export the initial static list as PRESETS for any code that still references it
+export { INITIAL_PRESETS as PRESETS }
 
 // Keep type re-export for convenience
 export type { PresetCaseName }

@@ -70,6 +70,7 @@ type ChatAction =
   | { type: 'ADD_MESSAGE'; payload: ChatMessage }
   | { type: 'ADD_ANNOTATION'; payload: Annotation }
   | { type: 'REMOVE_ANNOTATION'; payload: string }
+  | { type: 'REMOVE_ANNOTATIONS_BY_VARIANT'; payload: number }
   | { type: 'SEND_MESSAGE'; payload: { text: string } }
 
 function chatReducer(state: ChatState, action: ChatAction): ChatState {
@@ -88,6 +89,19 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ...state,
         pendingAnnotations: state.pendingAnnotations.filter(a => a.id !== action.payload),
       }
+
+    case 'REMOVE_ANNOTATIONS_BY_VARIANT': {
+      const deletedIdx = action.payload
+      // Remove all annotations for the deleted variant, then renumber remaining ones
+      const surviving = state.pendingAnnotations
+        .filter(a => a.variantIndex !== deletedIdx)
+        .map(a =>
+          a.variantIndex > deletedIdx
+            ? { ...a, variantIndex: a.variantIndex - 1, target: { ...a.target, variantIndex: a.target.variantIndex - 1 } }
+            : a,
+        )
+      return { ...state, pendingAnnotations: surviving }
+    }
 
     case 'SEND_MESSAGE': {
       const { text } = action.payload
@@ -162,6 +176,14 @@ interface ChatContextType {
   removeAnnotation: (id: string) => void
 
   /**
+   * Remove all annotations for a given variant index and renumber remaining
+   * annotations (those with a higher variantIndex shift down by 1).
+   *
+   * Called when a variant is deleted from the header strip.
+   */
+  removeAnnotationsByVariant: (variantIndex: number) => void
+
+  /**
    * Send a message to the LLM along with all pending annotations.
    *
    * Current (mock): appends user message + mock assistant response to history,
@@ -225,6 +247,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     [],
   )
 
+  const removeAnnotationsByVariant = useCallback(
+    (variantIndex: number) =>
+      dispatch({ type: 'REMOVE_ANNOTATIONS_BY_VARIANT', payload: variantIndex }),
+    [],
+  )
+
   const sendMessage = useCallback(
     (text: string) => dispatch({ type: 'SEND_MESSAGE', payload: { text } }),
     [],
@@ -236,6 +264,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     currentRound: state.currentRound,
     addAnnotation,
     removeAnnotation,
+    removeAnnotationsByVariant,
     sendMessage,
     hoveredVariantIndex,
     setHoveredVariantIndex,
